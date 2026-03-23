@@ -1,0 +1,72 @@
+## .NET / C# gitignore
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!**/packages/repositories.config
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Rider
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Test results
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*/
+
+# Publish output
+publish/
+**/Properties/PublishProfiles/
+
+# dotnet tool manifest (keep this if you use local tools)
+# .config/dotnet-tools.json
+
+# Entity Framework migrations (keep your own, ignore designer files)
+*.Designer.cs
+
+# Secrets / environment
+appsettings.*.json
+!appsettings.Development.json
+.env
+.env.*
+secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Docker
+docker-compose.override.yml
