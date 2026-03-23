@@ -281,6 +281,159 @@ dotnet test
 
 ---
 
+## Deployment
+
+### Option 1 — Local / Docker Compose
+
+The fastest way to run everything locally.
+
+```bash
+# 1. Copy the env template and set your API key
+cp .env.example .env
+# Edit .env: CONTROL_PLANE_API_KEY=<strong-random-key>
+
+# 2. Build images and start all services
+docker compose up --build
+
+# Services:
+#   Control Plane  →  http://localhost:5100  (Swagger UI at root)
+#   Proxy Node 1   →  http://localhost:5000
+#   Proxy Node 2   →  http://localhost:5001
+```
+
+> For development, the `docker-compose.override.yml` sets `ASPNETCORE_ENVIRONMENT=Development` and hardcodes `dev-secret-key` so you don't need `.env`.
+
+Scale proxy nodes on the fly:
+
+```bash
+docker compose up --scale proxy-node-1=4
+```
+
+---
+
+### Option 2 — Kubernetes (kubectl)
+
+Manifests live in [deploy/kubernetes/](deploy/kubernetes/).
+
+```
+deploy/kubernetes/
+├── namespace.yaml         # reverse-proxy namespace
+├── secret.yaml            # API key Secret (replace placeholder before apply)
+├── control-plane.yaml     # Deployment (2 replicas) + ClusterIP Service
+├── proxy-node.yaml        # Deployment (3 replicas) + Service + HPA (3–20 pods)
+└── ingress.yaml           # nginx Ingress → proxy-node Service
+```
+
+**Deploy:**
+
+```bash
+# 1. Create the secret (never commit real keys)
+kubectl create secret generic control-plane-secret \
+  --namespace reverse-proxy \
+  --from-literal=api-key='<your-strong-key>'
+
+# 2. Apply all manifests
+kubectl apply -f deploy/kubernetes/namespace.yaml
+kubectl apply -f deploy/kubernetes/control-plane.yaml
+kubectl apply -f deploy/kubernetes/proxy-node.yaml
+kubectl apply -f deploy/kubernetes/ingress.yaml
+
+# 3. Watch rollout
+kubectl rollout status deployment/control-plane -n reverse-proxy
+kubectl rollout status deployment/proxy-node    -n reverse-proxy
+```
+
+**Key Kubernetes design choices:**
+
+| Feature | Detail |
+|---|---|
+| Control plane | 2 replicas, `ClusterIP` only — not reachable from outside the cluster |
+| Proxy nodes | 3 replicas minimum, `topologySpreadConstraints` distributes across nodes |
+| Autoscaling | HPA scales proxy nodes from 3 → 20 pods on CPU ≥ 70 % or memory ≥ 80 % |
+| TLS | Ingress exposes proxy nodes; uncomment `tls:` block + cert-manager annotation for HTTPS |
+| Security | Non-root user (UID 1001), `readOnlyRootFilesystem`, all Linux capabilities dropped |
+
+---
+
+### Option 3 — CI/CD with GitHub Actions
+
+The pipeline at [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every push:
+
+```
+push / PR
+   │
+   ├─ build-and-test   dotnet build + dotnet test + coverage upload
+   │
+   └─ (main only)
+       ├─ docker        Build & push control-plane and proxy-node images to GHCR
+       └─ deploy        kubectl apply with the new SHA-tagged images → K8s rollout
+```
+
+**Required GitHub secrets:**
+
+| Secret | Value |
+|---|---|
+| `KUBECONFIG` | Base64-encoded kubeconfig for your cluster |
+
+Images are tagged `sha-<short-git-sha>` for traceability and `latest` on the `main` branch.
+
+---
+
+### Option 4 — Cloud PaaS (Azure / AWS / GCP)
+
+#### Azure Container Apps
+
+```bash
+# Control plane
+az containerapp create \
+  --name control-plane \
+  --resource-group my-rg \
+  --environment my-env \
+  --image ghcr.io/<org>/enterprise-proxy/control-plane:latest \
+  --target-port 8080 \
+  --ingress internal \
+  --env-vars "ControlPlane__ApiKey=secretref:api-key"
+
+# Proxy node (externally accessible, scales 1-10)
+az containerapp create \
+  --name proxy-node \
+  --resource-group my-rg \
+  --environment my-env \
+  --image ghcr.io/<org>/enterprise-proxy/proxy-node:latest \
+  --target-port 8080 \
+  --ingress external \
+  --min-replicas 1 --max-replicas 10 \
+  --env-vars \
+    "ProxyNode__ControlPlaneUrl=http://control-plane" \
+    "ProxyNode__ControlPlaneApiKey=secretref:api-key"
+```
+
+#### AWS ECS (Fargate)
+
+Define two ECS Task Definitions (`control-plane` and `proxy-node`) in the same VPC.
+- Control plane: internal ALB, no public IP
+- Proxy node: public ALB, ECS Service Auto Scaling on CPU
+
+#### GCP Cloud Run
+
+```bash
+# Control plane (internal ingress only)
+gcloud run deploy control-plane \
+  --image gcr.io/<project>/control-plane:latest \
+  --ingress internal \
+  --set-env-vars "ControlPlane__ApiKey=<key>"
+
+# Proxy node (public)
+gcloud run deploy proxy-node \
+  --image gcr.io/<project>/proxy-node:latest \
+  --ingress all \
+  --set-env-vars \
+    "ProxyNode__ControlPlaneUrl=https://control-plane-<hash>-uc.a.run.app,\
+     ProxyNode__ControlPlaneApiKey=<key>"
+```
+
+---
+
 ## Production Considerations
 
 | Area | Recommendation |

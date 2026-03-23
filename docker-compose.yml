@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+
+  # ── Control Plane ──────────────────────────────────────────────────────────
+  control-plane:
+    build:
+      context: .
+      dockerfile: src/ControlPlane/Dockerfile
+    image: enterprise-proxy/control-plane:latest
+    container_name: control-plane
+    restart: unless-stopped
+    ports:
+      - "5100:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ControlPlane__ApiKey=${CONTROL_PLANE_API_KEY:?CONTROL_PLANE_API_KEY is required}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - proxy-internal
+
+  # ── Proxy Node 1 ───────────────────────────────────────────────────────────
+  proxy-node-1:
+    build:
+      context: .
+      dockerfile: src/ProxyNode/Dockerfile
+    image: enterprise-proxy/proxy-node:latest
+    container_name: proxy-node-1
+    restart: unless-stopped
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ProxyNode__ControlPlaneUrl=http://control-plane:8080
+      - ProxyNode__ControlPlaneApiKey=${CONTROL_PLANE_API_KEY:?CONTROL_PLANE_API_KEY is required}
+      - ProxyNode__WatchTimeoutSeconds=30
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - proxy-internal
+      - proxy-public
+
+  # ── Proxy Node 2 (scale-out example) ──────────────────────────────────────
+  proxy-node-2:
+    image: enterprise-proxy/proxy-node:latest
+    container_name: proxy-node-2
+    restart: unless-stopped
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:8080
+      - ProxyNode__ControlPlaneUrl=http://control-plane:8080
+      - ProxyNode__ControlPlaneApiKey=${CONTROL_PLANE_API_KEY:?CONTROL_PLANE_API_KEY is required}
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    networks:
+      - proxy-internal
+      - proxy-public
+
+networks:
+  proxy-internal:
+    driver: bridge
+    internal: true          # Control plane is not exposed to the outside
+  proxy-public:
+    driver: bridge

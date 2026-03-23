@@ -1,0 +1,12 @@
+**/.vs
+**/.vscode
+**/.idea
+**/bin
+**/obj
+**/TestResults
+**/*.user
+**/*.suo
+.git
+.gitignore
+README.md
+docker-compose.override.yml
